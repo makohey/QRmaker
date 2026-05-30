@@ -26,6 +26,7 @@
     }
     textarea{min-height:130px;resize:vertical;line-height:1.6}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
     .tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
     button{border:0;border-radius:15px;padding:12px 16px;font-weight:900;cursor:pointer;font-size:15px}
     .tab{background:#fffdf8;border:1px solid var(--line);color:var(--muted)}
@@ -48,7 +49,7 @@
     .item{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:10px}
     .item strong{display:block}.item span{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .hidden{display:none}
-    @media(max-width:760px){body{padding:12px}.grid{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
+    @media(max-width:760px){body{padding:12px}.grid{grid-template-columns:1fr}.row{grid-template-columns:1fr}.row3{grid-template-columns:1fr}}
     @media print{
       body{background:white;padding:0}.input,.lead,.note,.actions,.history,.meter,.tabs{display:none!important}
       .grid,.app,.card{display:block;box-shadow:none;border:0;background:white;padding:0;margin:0}
@@ -82,7 +83,7 @@
           <textarea id="textValue" maxlength="120" placeholder="まずは短文だけ。日本語長文はURL化してQRにするのが安全。"></textarea>
         </div>
 
-        <div class="row">
+        <div class="row3">
           <div>
             <label>QRサイズ</label>
             <select id="size">
@@ -99,6 +100,15 @@
               <option value="8">印刷重視</option>
             </select>
           </div>
+          <div>
+            <label>誤り訂正</label>
+            <select id="ecLevel">
+              <option value="L">低（容量大）</option>
+              <option value="M" selected>標準</option>
+              <option value="Q">高</option>
+              <option value="H">最高（印刷向）</option>
+            </select>
+          </div>
         </div>
 
         <div class="meter">
@@ -109,6 +119,7 @@
         <div class="actions">
           <button class="primary" id="make">QR作成</button>
           <button class="secondary" id="download">PNG保存</button>
+          <button class="secondary" id="downloadSvg">SVG保存</button>
           <button class="secondary" id="print">印刷</button>
           <button class="ghost" id="clear">履歴削除</button>
         </div>
@@ -116,9 +127,13 @@
         <div class="note">
           この版は完全オフラインです。ネットワークへ読みに行きません。<br>
           まずURLで読み取り確認してください。通れば土台は合格です。<br><br>
-          <strong>読み取りヒント：</strong><br>
-          同じiPhone（アイフォーン）に表示したQRを、そのiPhoneのカメラで直接読むことは基本できません。<br>
-          PCやiPad（アイパッド）など別の画面にQRを表示してiPhoneで読むか、QRをPNG保存して写真アプリから開いてください。
+          <strong>誤り訂正レベル：</strong>高いほど汚れ・欠けに強くなりますが、その分QRが細かくなります。印刷して貼る用途なら「最高」、画面表示で読ませるだけなら「標準」で十分です。<br><br>
+          <strong>読み取りヒント（iPhone・iPad＝アイフォーン・アイパッド）：</strong><br>
+          同じ端末に表示したQRを、その端末のカメラで直接読むことはできません。でも一台だけで完結できます。<br>
+          ①「PNG保存」でQR画像を保存<br>
+          ② 写真アプリでその画像を開く<br>
+          ③ QRの部分を長押し → 出てきたメニューで「Safari（サファリ）で開く」をタップ<br>
+          ※ iOS（アイオーエス）15以降の機能です。反応しない時は、設定 →「カメラ」→「QRコードをスキャン」と、写真アプリ側の「テキスト認識表示」がオンか確認してください。
         </div>
       </section>
 
@@ -1425,6 +1440,8 @@ module.exports = QRCode;
 let mode = "url";
 let currentText = "";
 let currentTitle = "";
+let currentLevel = null;
+let currentMargin = 4;
 const $ = id => document.getElementById(id);
 const SAFE = 250;
 
@@ -1434,6 +1451,17 @@ function toByteString(str){
 }
 
 function bytes(s){ return new TextEncoder().encode(s || "").length; }
+
+// 誤り訂正レベルの対応表（セレクトのvalue → ライブラリの定数）
+const EC = {
+  L: OfflineQRErrorCorrectLevel.L,
+  M: OfflineQRErrorCorrectLevel.M,
+  Q: OfflineQRErrorCorrectLevel.Q,
+  H: OfflineQRErrorCorrectLevel.H
+};
+function getLevel(){
+  return EC[$("ecLevel").value] || OfflineQRErrorCorrectLevel.M;
+}
 
 function getData(){
   if(mode === "url"){
@@ -1454,8 +1482,8 @@ function updateMeter(){
   else { $("status").textContent = "多すぎ"; $("fill").classList.add("bad"); }
 }
 
-function drawQR(text, canvas, targetSize, margin){
-  const qr = new OfflineQRCode(-1, OfflineQRErrorCorrectLevel.M);
+function drawQR(text, canvas, targetSize, margin, level){
+  const qr = new OfflineQRCode(-1, level || getLevel());
   qr.addData(toByteString(text));
   qr.make();
 
@@ -1487,11 +1515,13 @@ function makeQR(save=true){
   }
   currentText = data.text;
   currentTitle = data.title;
+  currentLevel = getLevel();
+  currentMargin = Number($("margin").value);
   try{
     $("qrArea").innerHTML = "";
     const canvas = document.createElement("canvas");
     $("qrArea").appendChild(canvas);
-    drawQR(currentText, canvas, Number($("size").value), Number($("margin").value));
+    drawQR(currentText, canvas, Number($("size").value), currentMargin, currentLevel);
     $("label").textContent = currentTitle;
     $("payload").textContent = currentText.length > 120 ? currentText.slice(0,120) + "…" : currentText;
     if(save) addHistory(currentTitle, currentText);
@@ -1526,10 +1556,12 @@ function renderHistory(){
     div.querySelector("span").textContent = it.text;
     div.querySelector("button").onclick = () => {
       currentTitle = it.title; currentText = it.text;
+      currentLevel = getLevel();
+      currentMargin = Number($("margin").value);
       $("qrArea").innerHTML = "";
       const canvas = document.createElement("canvas");
       $("qrArea").appendChild(canvas);
-      drawQR(currentText, canvas, Number($("size").value), Number($("margin").value));
+      drawQR(currentText, canvas, Number($("size").value), currentMargin, currentLevel);
       $("label").textContent = currentTitle;
       $("payload").textContent = currentText.length > 120 ? currentText.slice(0,120) + "…" : currentText;
     };
@@ -1559,6 +1591,55 @@ function download(){
   a.click();
 }
 
+// SVG（ベクター）でQRを書き出す。拡大しても劣化しないので大判印刷向き
+function escapeXml(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+}
+function buildSVG(text, margin, level){
+  const qr = new OfflineQRCode(-1, level || getLevel());
+  qr.addData(toByteString(text));
+  qr.make();
+  const count = qr.getModuleCount();
+  const scale = 10;                 // 基準モジュールサイズ。ベクターなので拡大は自由
+  const pad = margin * scale;
+  const dim = count * scale + pad * 2;
+  const labelH = 72;
+  const totalH = dim + labelH;
+  let rects = "";
+  for(let r = 0; r < count; r++){
+    for(let c = 0; c < count; c++){
+      if(qr.isDark(r, c)){
+        rects += `<rect x="${pad + c*scale}" y="${pad + r*scale}" width="${scale}" height="${scale}"/>`;
+      }
+    }
+  }
+  const title = escapeXml(currentTitle || "QRでしょう");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${dim}" height="${totalH}" viewBox="0 0 ${dim} ${totalH}" shape-rendering="crispEdges">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<g fill="#111111">${rects}</g>
+<text x="${dim/2}" y="${dim + labelH/2 + 8}" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="bold" fill="#1f1a15" text-anchor="middle">${title}</text>
+</svg>`;
+}
+
+function downloadSVG(){
+  if(!currentText){ alert("先にQRを作成してください。"); return; }
+  let svg;
+  try{
+    svg = buildSVG(currentText, currentMargin, currentLevel);
+  }catch(e){
+    alert("SVG作成に失敗しました。内容を短くして試してください。");
+    console.error(e); return;
+  }
+  const blob = new Blob([svg], {type:"image/svg+xml;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (currentTitle || "qr-desho").replace(/[\\/:*?"<>|]/g,"_") + ".svg";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 $("urlTab").onclick = () => {
   mode = "url";
   $("urlTab").classList.add("active"); $("textTab").classList.remove("active");
@@ -1578,6 +1659,7 @@ document.querySelectorAll("input,textarea,select").forEach(el=>{
 });
 $("make").onclick = () => makeQR(true);
 $("download").onclick = download;
+$("downloadSvg").onclick = downloadSVG;
 $("print").onclick = () => window.print();
 $("clear").onclick = () => {
   if(confirm("履歴を削除しますか？")){
